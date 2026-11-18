@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from app.db import FIXTURES_DIR, connect
+from app.modules import hot_window_cold_archive as hotcold
 
 
 SCHEMA = """
@@ -62,6 +63,8 @@ EVENT_STATUS = {
 def init_db():
     conn = connect()
     conn.executescript(SCHEMA)
+    # hot_window_cold_archive：hops 加 is_cold/archive_hash 列，建窗口配置/冷段台账/不可变触发器
+    hotcold.ensure_schema(conn)
     n = conn.execute("SELECT COUNT(*) AS c FROM waybills").fetchone()["c"]
     if n == 0:
         _seed_fixtures(conn)
@@ -93,6 +96,13 @@ def _seed_fixtures(conn):
             ),
         )
     _refresh_projections(conn)
+    # hot_window_cold_archive：演示运单配热窗口（最大保留点数=3），种子 3 点恰好全热；
+    # 随后同事务切窗（此时无溢出，幂等空转），装载第 4 点起最老点自动入冷。
+    conn.execute(
+        "INSERT OR IGNORE INTO hot_windows(waybill_id, max_points, updated_at) VALUES ('WB-1001', 3, datetime('now'))"
+    )
+    for wb in conn.execute("SELECT id FROM waybills").fetchall():
+        hotcold.archive_cut(conn, wb["id"])
 
 
 def _refresh_projections(conn):

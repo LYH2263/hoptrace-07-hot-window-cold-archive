@@ -19,6 +19,9 @@ def overview():
             "hops_sidecar": conn.execute(
                 "SELECT COUNT(*) AS c FROM hops WHERE channel='sidecar'"
             ).fetchone()["c"],
+            "hops_cold": conn.execute(
+                "SELECT COUNT(*) AS c FROM hops WHERE is_cold=1"
+            ).fetchone()["c"],
             "quarantine": conn.execute("SELECT COUNT(*) AS c FROM quarantine").fetchone()["c"],
         }
     finally:
@@ -38,13 +41,14 @@ def list_waybills():
 
 
 @router.get("/waybills/{waybill_id}/timeline")
-def waybill_timeline(waybill_id: str):
+def waybill_timeline(waybill_id: str, include_cold: bool = False):
     conn = connect()
     try:
         wb = conn.execute("SELECT * FROM waybills WHERE id=?", (waybill_id,)).fetchone()
         if not wb:
             raise HTTPException(404, "运单不存在")
-        hops = timeline_svc.list_primary(conn, waybill_id)
+        # 正式轴默认只含热段；include_cold=true 时只读带出冷归档点
+        hops = timeline_svc.list_primary(conn, waybill_id, include_cold=include_cold)
         proof = conn.execute(
             "SELECT * FROM status_proofs WHERE waybill_id=? ORDER BY id DESC LIMIT 1",
             (waybill_id,),
